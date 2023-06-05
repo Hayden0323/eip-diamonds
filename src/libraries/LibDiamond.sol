@@ -8,9 +8,13 @@ library LibDiamond {
 
     // Diamond specific errors
     error NotContractOwner(address _user, address _contractOwner);
+    error NoSelectorsProvidedForFacetForCut(address _facetAddress);
     error CannotAddSelectorsToZeroAddress(bytes4[] _selectors);
     error NoBytecodeAtAddress(address _contractAddress, string _message);
     error CannotAddFunctionToDiamondThatAlreadyExists(bytes4 _selector);
+    error CannotReplaceFunctionsFromFacetWithZeroAddress(bytes4[] _selectors);
+    error CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(bytes4 _selector);
+    error CannotRemoveImmutableFunction(bytes4 _selector);
 
     struct FacetAddressAndSelectorPosition {
         address facetAddress;
@@ -91,6 +95,32 @@ library LibDiamond {
         }
     }
 
+    function replaceFunctions(address _facetAddress, bytes4[] memory _functionSelectors) internal {  
+        DiamondStorage storage ds = diamondStorage();
+        if (_facetAddress == address(0)) {
+            revert CannotReplaceFunctionsFromFacetWithZeroAddress(_functionSelectors);
+        }
+        uint96 selectorPosition = uint96(
+            ds.facetFunctionSelectors[_facetAddress].functionSelectors.length
+        );
+        // add new facet address if it does not exist
+        if (selectorPosition == 0) {
+            addFacet(ds, _facetAddress);
+        }
+        for (uint256 selectorIndex; selectorIndex < _functionSelectors.length; selectorIndex++) {
+            bytes4 selector = _functionSelectors[selectorIndex];
+            address oldFacetAddress = ds
+                .facetAddressAndSelectorPosition[selector]
+                .facetAddress;
+            if (oldFacetAddress == _facetAddress) {
+                revert CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(selector);
+            }
+            removeFunction(ds, oldFacetAddress, selector);
+            addFunction(ds, selector, selectorPosition, _facetAddress);
+            selectorPosition++;
+        }
+    }
+
     function addFacet(DiamondStorage storage ds, address _facetAddress) internal {
         enforceHasContractCode(_facetAddress, "LibDiamondCut: Add facet has no code");
         ds.facetFunctionSelectors[_facetAddress].facetAddressPosition = ds.facetAddresses.length;
@@ -106,6 +136,54 @@ library LibDiamond {
         ds.facetAddressAndSelectorPosition[_selector].selectorPosition = _selectorPosition;
         ds.facetFunctionSelectors[_facetAddress].functionSelectors.push(_selector);
         ds.facetAddressAndSelectorPosition[_selector].facetAddress = _facetAddress;
+    }
+
+    function removeFunction(
+        DiamondStorage storage ds,
+        address _facetAddress,
+        bytes4 _selector
+    ) internal {
+        if (_facetAddress == address(0)) {
+            revert NoSelectorsProvidedForFacetForCut(_facetAddress);
+        }
+        // an immutable function is a function defined directly in a diamond
+        if (_facetAddress == address(this)) {
+            revert CannotRemoveImmutableFunction(_selector);
+        }
+        // replace selector with last selector, then delete last selector
+        uint256 selectorPosition = ds.facetAddressAndSelectorPosition[_selector].selectorPosition;
+        uint256 lastSelectorPosition = ds
+            .facetFunctionSelectors[_facetAddress]
+            .functionSelectors.length - 1;
+        // if not the same then replace _selector with lastSelector
+        if (selectorPosition != lastSelectorPosition) {
+            bytes4 lastSelector = ds
+                .facetFunctionSelectors[_facetAddress]
+                .functionSelectors[lastSelectorPosition];
+            ds.facetFunctionSelectors[_facetAddress]
+                .functionSelectors[selectorPosition] = lastSelector;
+            ds.facetAddressAndSelectorPosition[lastSelector]
+                .selectorPosition = uint96(selectorPosition);
+        }
+        // delete the last selector
+        ds.facetFunctionSelectors[_facetAddress].functionSelectors.pop();
+        delete ds.facetAddressAndSelectorPosition[_selector];
+
+        // if no more selectors for facet address then delete the facet address
+        if (lastSelectorPosition == 0) {
+            // replace facet address with last facet address and delete last facet address
+            uint256 lastFacetAddressPosition = ds.facetAddresses.length - 1;
+            uint256 facetAddressPosition = ds
+                .facetFunctionSelectors[_facetAddress]
+                .facetAddressPosition;
+            if (facetAddressPosition != lastFacetAddressPosition) {
+                address lastFacetAddress = ds.facetAddresses[lastFacetAddressPosition];
+                ds.facetAddresses[facetAddressPosition] = lastFacetAddress;
+                ds.facetFunctionSelectors[lastFacetAddress].facetAddressPosition = facetAddressPosition;
+            }
+            ds.facetAddresses.pop();
+            delete ds.facetFunctionSelectors[_facetAddress].facetAddressPosition;
+        }
     }
 
     function enforceHasContractCode(address _contract, string memory _errorMessage) internal view {
