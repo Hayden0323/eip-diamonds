@@ -11,6 +11,7 @@ library LibDiamond {
     error NoSelectorsProvidedForFacetForCut(address _facetAddress);
     error CannotAddSelectorsToZeroAddress(bytes4[] _selectors);
     error NoBytecodeAtAddress(address _contractAddress, string _message);
+    error IncorrectFacetCutAction(uint8 _action);
     error CannotAddFunctionToDiamondThatAlreadyExists(bytes4 _selector);
     error CannotReplaceFunctionsFromFacetWithZeroAddress(bytes4[] _selectors);
     error CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(bytes4 _selector);
@@ -74,6 +75,30 @@ library LibDiamond {
         address _init,
         bytes _calldata
     );
+
+    // Internal function version of diamondCut
+    function diamondCut(
+        IDiamondCut.FacetCut[] memory _diamondCut,
+        address _init,
+        bytes memory _calldata
+    ) internal {
+        for (uint256 facetIndex; facetIndex < _diamondCut.length; facetIndex++) {
+            IDiamondCut.FacetCutAction action = _diamondCut[facetIndex].action;
+            bytes4[] memory functionSelectors = _diamondCut[facetIndex].functionSelectors;
+            address facetAddress = _diamondCut[facetIndex].facetAddress;
+            if (action == IDiamondCut.FacetCutAction.Add) {
+                addFunctions(facetAddress, functionSelectors);
+            } else if (action == IDiamondCut.FacetCutAction.Replace) {
+                replaceFunctions(facetAddress, functionSelectors);
+            } else if (action == IDiamondCut.FacetCutAction.Remove) {
+                removeFunctions(facetAddress, functionSelectors);
+            } else {
+                revert IncorrectFacetCutAction(uint8(action));
+            }
+        }
+        emit DiamondCut(_diamondCut, _init, _calldata);
+        initializeDiamondCut(_init, _calldata);
+    }
 
     function addFunctions(address _facetAddress, bytes4[] memory _functionSelectors) internal {    
         if (_facetAddress == address(0)) {
