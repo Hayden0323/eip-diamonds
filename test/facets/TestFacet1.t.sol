@@ -4,7 +4,7 @@ pragma solidity 0.8.17;
 import {TestBase} from "../utils/TestBase.sol";
 import {TestFacet1} from "diamond/facets/TestFacet1.sol";
 import {Diamond} from "diamond/Diamond.sol";
-import {console} from "forge-std/Console.sol";
+import {console} from "forge-std/console.sol";
 
 contract TestFacet1Test is TestBase {
     TestFacet1 internal testFacet1;

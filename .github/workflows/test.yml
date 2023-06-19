@@ -1,7 +1,10 @@
-name: test
+name: Tests
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
 
 env:
   FOUNDRY_PROFILE: ci
